@@ -1,2 +1,253 @@
-# GLM
-GLM Analysis Post Hoc test and Visualization
+## Generalized Linear Models (GLM) in R
+
+This R Markdown document provides a comprehensive guide to performing GLM analysis, post-hoc tests, least square means calculations, and creating publication-quality graphics.
+
+```{r}
+# Load required packages
+library(tidyverse)    # Data manipulation and visualization
+library(lme4)         # For mixed models (if needed)
+library(car)          # For ANOVA tables
+library(emmeans)      # For post-hoc tests and least square means
+library(multcomp)     # For multiple comparisons
+library(ggpubr)       # For publication-quality graphics
+library(broom)        # For tidy model output
+library(performance)  # For model diagnostics
+
+# Set theme for publication-quality graphics
+theme_set(theme_pubr())
+```
+
+## Steps for importing your own dataset for Analysis
+
+```{r}
+## Here, in this chunk ## is the comment # is the code
+## First check current directory first
+#getwd()
+##Set working directory to a specific path
+#setwd("C:/Users/YourName/Projects/MyAnalysis")
+
+## Import data from CSV file
+## Replace 'your_data.csv' with your actual file name
+#data <- read.csv("your_data.csv")
+
+##Display the first few rows of the data
+#head(data) %>% kable()
+
+##Check data structure
+#str(data)
+
+# Summary statistics
+#summary(data)
+```
+
+## Example Dataset
+
+I am create a sample dataset for demonstration purpose:
+
+```{r}
+set.seed(123)
+
+# Create a sample dataset
+n <- 120
+data <- data.frame(
+  treatment = rep(c("A", "B", "C", "D"), each = n/4),
+  dose = rep(c("Low", "Medium", "High"), times = n/3),
+  response = c(
+    rpois(n/4, lambda = 10),  # Treatment A
+    rpois(n/4, lambda = 15),  # Treatment B  
+    rpois(n/4, lambda = 20),  # Treatment C
+    rpois(n/4, lambda = 25)   # Treatment D
+  ),
+  covariate = rnorm(n, mean = 50, sd = 10)
+)
+
+# Convert factors
+data$treatment <- factor(data$treatment)
+data$dose <- factor(data$dose, levels = c("Low", "Medium", "High"))
+
+head(data)
+```
+
+## Descriptive Statistics
+
+```{r}
+# Summary statistics
+summary(data)
+
+# Count by treatment and dose
+table(data$treatment, data$dose)
+```
+
+## Fitting a GLM Model
+
+Here I am fitting a Poisson GLM (appropriate for count data). For Gaussian data, use family = gaussian (link = "identity"). For Binomial data, use family = binomial(link = "logit")
+
+```{r}
+# Fit GLM with Poisson family
+model <- glm(response ~ treatment * dose + covariate, 
+             data = data, 
+             family = poisson(link = "log"))
+
+# Model summary
+summary(model)
+
+# ANOVA table
+car::Anova(model, type = "III")
+```
+
+## Model Diagnostics
+
+```{r}
+# Check for overdispersion
+# If residual deviance >> degrees of freedom, consider quasipoisson
+dispersion_test <- model$deviance / model$df.residual
+cat("Dispersion parameter:", dispersion_test, "\n")
+
+# Residual plots
+par(mfrow = c(2, 2))
+plot(model)
+```
+
+# Check for influential observations
+
+```{r}
+influence_measures <- influence.measures(model)
+summary(influence_measures)
+
+# Check multicollinearity (for continuous predictors)
+# vif(model) # Only for continuous predictors in this case
+```
+
+## Calculating Least-Squares Means (Estimated Marginal Means)
+
+```{r}
+# Calculate least-squares means for treatment
+lsmeans_treatment <- emmeans(model, ~ treatment)
+lsmeans_treatment
+
+# For dose
+lsmeans_dose <- emmeans(model, ~ dose)
+lsmeans_dose
+
+# For interaction
+lsmeans_interaction <- emmeans(model, ~ treatment:dose)
+lsmeans_interaction
+```
+
+## Post-hoc Tests
+
+```{r}
+# Pairwise comparisons for treatment
+posthoc_treatment <- pairs(lsmeans_treatment, adjust = "tukey")
+posthoc_treatment
+
+# Pairwise comparisons for dose
+posthoc_dose <- pairs(lsmeans_dose, adjust = "tukey")
+posthoc_dose
+
+# Compact letter display for treatment
+cld_treatment <- cld(lsmeans_treatment, Letters = letters, adjust = "tukey")
+cld_treatment
+
+# Compact letter display for dose
+cld_dose <- cld(lsmeans_dose, Letters = letters, adjust = "tukey")
+cld_dose
+```
+
+## Publication-Quality Visualizations
+
+### 1. Mean Plot with Error Bars
+
+```{r}
+# Create data frame for plotting
+plot_data <- as.data.frame(lsmeans_treatment)
+
+# Create mean plot with confidence intervals
+mean_plot <- ggplot(plot_data, aes(x = treatment, y = emmean)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = asymp.LCL, ymax = asymp.UCL), width = 0.2) +
+  labs(title = "Least-Squares Means by Treatment",
+       x = "Treatment", 
+       y = "Estimated Marginal Mean (log scale)") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+mean_plot
+```
+
+### 2. Interaction Plot
+
+```{r}
+# Get interaction means
+interaction_data <- as.data.frame(lsmeans_interaction)
+
+# Create interaction plot
+interaction_plot <- ggplot(interaction_data, 
+                           aes(x = dose, y = emmean, color = treatment, group = treatment)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = asymp.LCL, ymax = asymp.UCL), width = 0.1) +
+  labs(title = "Treatment × Dose Interaction",
+       x = "Dose Level", 
+       y = "Estimated Marginal Mean",
+       color = "Treatment") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.position = "top")
+
+interaction_plot
+```
+
+### 3. Bar Plot with Significance Letters
+
+```{r}
+# Prepare data with significance letters
+cld_data <- as.data.frame(cld_treatment)
+
+# Create bar plot with significance letters
+bar_plot <- ggplot(cld_data, aes(x = treatment, y = emmean, fill = treatment)) +
+  geom_bar(stat = "identity", alpha = 0.7) +
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.2) +
+  geom_text(aes(label = .group, y = emmean + SE + 0.5), vjust = 0) +
+  labs(title = "Treatment Means with Standard Errors",
+       x = "Treatment", 
+       y = "Estimated Marginal Mean",
+       fill = "Treatment") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.position = "none")
+
+bar_plot
+```
+
+### 4. Multi-panel Publication Figure
+
+```{r}
+# Arrange multiple plots
+multi_panel <- ggarrange(mean_plot, bar_plot, interaction_plot,
+                         ncol = 2, nrow = 2,
+                         labels = c("A", "B", "C"),
+                         common.legend = FALSE)
+
+# Add title
+multi_panel <- annotate_figure(multi_panel,
+                               top = text_grob("GLM Analysis Results", 
+                                               color = "black", 
+                                               face = "bold", 
+                                               size = 14))
+
+multi_panel
+```
+
+## Exporting Results
+
+```{r}
+##Save plots (uncomment to use)
+#ggsave("mean_plot.png", mean_plot, width = 8, height = 6, dpi = 300)
+#ggsave("interaction_plot.png", interaction_plot, width = 8, height = 6, dpi = 300)
+#ggsave("multi_panel_plot.png", multi_panel, width = 10, height = 8, dpi = 300)
+
+##Save results to CSV
+#write.csv(as.data.frame(lsmeans_treatment), "treatment_means.csv")
+#write.csv(as.data.frame(posthoc_treatment), "treatment_comparisons.csv")
+```
